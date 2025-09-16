@@ -1,7 +1,10 @@
 
 <div style="background: white; padding: 20px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1); text-align: center;">
-    <img src="./logo.png" alt="Logo" style="max-width: 100%; height: auto; border-radius: 8px;" />
-    <p style="margin-top: 12px; font-size: 1rem; color: #555;">Interactive Graphics-Based Framework</p>
+    <p align="center">
+        🎉 100th Repository! 🎉
+        <br><br>
+        <img src="./logo.png" align="center" alt="Logo" style="max-width: 100%; width: 56%; height: auto; border-radius: 8px; align:center;" />
+    </p>
 </div>
 
 <br>
