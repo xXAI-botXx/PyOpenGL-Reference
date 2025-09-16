@@ -39,7 +39,8 @@ Engine Development Progress
 🚩
 [Step 1] Setup & Basics 
    └─ Core Concept Design/Idea
-   └─ Window + Input
+   └─ Window Creation (PyGame & GLFW)
+   └─ Input Processing (PyGame & GLFW)
    └─ Simple OpenGL triangle
 
       |
