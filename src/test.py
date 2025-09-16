@@ -2,7 +2,7 @@ import sys
 
 sys.path += ["."]
 
-import wind_forge_engine as wf
+import windforge as wf
 
 class Test(wf.GraphicsApplication):
     def __init__(self):
