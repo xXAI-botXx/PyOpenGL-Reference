@@ -109,8 +109,6 @@ class ControllerButton(Enum):
     Y = auto()
     LB = auto()       # Left bumper
     RB = auto()       # Right bumper
-    LT = auto()       # Left trigger
-    RT = auto()       # Right trigger
     START = auto()
     SELECT = auto()
     LSTICK = auto()   # Left stick click
@@ -386,7 +384,10 @@ class InputState(object):
         self.mouse_position = (0, 0)
         self.controllers = controllers  # per controller id -> Controller
         self.missed_controllers = {}
-        self.window = {}  # dict[name, bool]
+        self.window = {"position": [0, 0],
+                       "size": [512, 512],
+                       "accessed": True,
+                       "active": True}
         self.quit = False
 
     def update(self, events):
@@ -432,13 +433,14 @@ class InputState(object):
             elif event.type == EventType.CONTROLLER_ADDED:
                 self.controllers[event.controller_id] = Controller(controller_id=event.controller_id)
             elif event.type == EventType.CONTROLLER_REMOVED:
-                del self.controllers[event.controller_id]
+                # del self.controllers[event.controller_id]
+                self.controllers.pop(event.controller_id, None)
 
             # Window
             elif event.type == EventType.QUIT:
                 self.quit = True
             elif event.type == EventType.WINDOW_MOVE:
-                self.window["accessed"] = event.window_position
+                self.window["position"] = event.window_position
             elif event.type == EventType.WINDOW_RESIZE:
                 self.window["size"] = event.window_size
             elif event.type == EventType.WINDOW_ACCESS:
@@ -460,22 +462,21 @@ class InputState(object):
             print(f"[INFO] Wind-Forge added Controller by itself -> window backend did not added the device.")
         return new_event_list
 
-    def get_all_active(self):
+    def get_all_active(self, as_string=False):
         active_keys = [key for key, pressed in self.keys.items() if pressed]
         active_mouse_buttons = [btn for btn, pressed in self.mouse_buttons.items() if pressed]
+        print(active_mouse_buttons)
 
         active_controllers = {}
         for cid, controller in self.controllers.items():
-            actives = controller.get_active()
+            actives = controller.get_active(as_string=as_string)
             # if actives:
             active_controllers[cid] = actives
 
         return {
-            "keys": active_keys,
-            "mouse_buttons": active_mouse_buttons,
-            "mouse_position": self.mouse_position,
-            "controllers": active_controllers,
-            "quit": self.quit
+            "keys": list(map(lambda x: x.name, active_keys)) if as_string else active_keys,
+            "mouse": list(map(lambda x: x.name, active_mouse_buttons)) if as_string else active_mouse_buttons,
+            "controllers": active_controllers
         }
 
 
@@ -494,8 +495,6 @@ class Controller(object):
         self.Y = False
         self.LB = False       # Left bumper
         self.RB = False       # Right bumper
-        self.LT = False       # Left trigger
-        self.RT = False       # Right trigger
         self.START = False
         self.SELECT = False
         self.LSTICK = False   # Left stick click
@@ -519,13 +518,11 @@ class Controller(object):
             ControllerButton.Y: "Y",
             ControllerButton.LB: "LB",
             ControllerButton.RB: "RB",
-            ControllerButton.LT: "LT",
-            ControllerButton.RT: "RT",
             ControllerButton.START: "START",
             ControllerButton.SELECT: "SELECT",
             ControllerButton.LSTICK: "LSTICK",
             ControllerButton.RSTICK: "RSTICK",
-            ControllerButton.DPAD: "DPAD",
+            ControllerButton.DPAD: "DPAD"
         }
 
         self._axis_map = {
@@ -572,27 +569,26 @@ class Controller(object):
                                         ControllerButton.A: self.A, ControllerButton.B: self.B, 
                                         ControllerButton.X: self.X, ControllerButton.Y: self.Y,
                                         ControllerButton.LB: self.LB, ControllerButton.RB: self.RB,
-                                        ControllerButton.LT: self.LT, ControllerButton.RT: self.RT,
                                         ControllerButton.START: self.START, ControllerButton.SELECT: self.SELECT,
                                         ControllerButton.LSTICK: self.LSTICK, ControllerButton.RSTICK: self.RSTICK,
                                         ControllerButton.DPAD: self.DPAD
                                         }.items() if pressed]
 
-    def get_active(self):
+    def get_active(self, as_string=False):
         """
         Return dict of current buttons and axis values.
         """
-        precision = 0.01
+        precision = 0.1
         active = self.get_pressed_buttons()
         active += [axis_name for axis_name, active in {
-                                                        "LEFT_STICK_X": -precision > self.LEFT_STICK_X > precision,
-                                                        "LEFT_STICK_Y": -precision > self.LEFT_STICK_Y > precision,
-                                                        "RIGHT_STICK_X": -precision > self.RIGHT_STICK_X > precision,
-                                                        "RIGHT_STICK_Y": -precision > self.RIGHT_STICK_Y > precision,
-                                                        "LEFT_TRIGGER": self.LEFT_TRIGGER > precision,
-                                                        "RIGHT_TRIGGER": self.RIGHT_TRIGGER > precision,
+                                                        ControllerAxis.LEFT_STICK_X: -precision > self.LEFT_STICK_X or self.LEFT_STICK_X > precision,
+                                                        ControllerAxis.LEFT_STICK_Y: -precision > self.LEFT_STICK_Y or self.LEFT_STICK_Y > precision,
+                                                        ControllerAxis.RIGHT_STICK_X: -precision > self.RIGHT_STICK_X or self.RIGHT_STICK_X > precision,
+                                                        ControllerAxis.RIGHT_STICK_Y: -precision > self.RIGHT_STICK_Y or self.RIGHT_STICK_Y > precision,
+                                                        ControllerAxis.LEFT_TRIGGER: self.LEFT_TRIGGER > precision,
+                                                        ControllerAxis.RIGHT_TRIGGER: self.RIGHT_TRIGGER > precision,
                                                       }.items() if active] 
-        return active
+        return list(map(lambda x: x.name, active)) if as_string else active
         
 
     def get_dpad_state(self):
@@ -716,13 +712,13 @@ class PygameBackend(WindowBackend):
         pygame.display.set_caption(title)
 
         # enable controller support
-        self.controllers = []
+        self.controllers = dict()
         pygame.joystick.init()
         # create joystick objects for each connected device
         for controller_id in range(pygame.joystick.get_count()):
             controller = pygame.joystick.Joystick(controller_id)
             controller.init()
-            self.controllers = [controller]
+            self.controllers[controller_id] = controller
             print(f"[INFO] Initialized joystick {controller_id}: {controller.get_name()}")
 
     def get_events(self):
@@ -762,10 +758,10 @@ class PygameBackend(WindowBackend):
             # Mouse
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button in PYGAME_MOUSE_BUTTON_MAP:
-                    events += [Event(EventType.MOUSE_DOWN, key=PYGAME_MOUSE_BUTTON_MAP[event.button], mouse_pos=event.pos)]
+                    events += [Event(EventType.MOUSE_DOWN, mouse_button=PYGAME_MOUSE_BUTTON_MAP[event.button], mouse_pos=event.pos)]
             elif event.type == pygame.MOUSEBUTTONUP:
                 if event.button in PYGAME_MOUSE_BUTTON_MAP:
-                    events += [Event(EventType.MOUSE_UP, key=PYGAME_MOUSE_BUTTON_MAP[event.button], mouse_pos=event.pos)]
+                    events += [Event(EventType.MOUSE_UP, mouse_button=PYGAME_MOUSE_BUTTON_MAP[event.button], mouse_pos=event.pos)]
             elif event.type == pygame.MOUSEMOTION:
                 events += [Event(EventType.MOUSE_MOVE, mouse_pos=event.pos)]
             elif event.type == pygame.MOUSEWHEEL:
@@ -775,11 +771,12 @@ class PygameBackend(WindowBackend):
             elif event.type == pygame.JOYDEVICEADDED:
                 controller = pygame.joystick.Joystick(event.device_index)
                 controller.init()
+                self.controllers[event.device_index] = controller
                 print(f"[INFO] Joystick added: {controller.get_name()} (id={event.device_index})")
                 events += [Event(EventType.CONTROLLER_ADDED, controller_id=event.device_index)]
             elif event.type == pygame.JOYDEVICEREMOVED:
                 print(f"Joystick removed: id={event.instance_id}")
-                # you may want to clean up self.controllers[e.instance_id]
+                del self.controllers[event.instance_id]
             elif event.type == pygame.JOYBUTTONDOWN:  #pygame.CONTROLLERBUTTONDOWN:
                 if event.button in PYGAME_CONTROLLER_BUTTON_MAP:
                     events += [Event(EventType.CONTROLLER_BUTTON_DOWN,
@@ -804,7 +801,7 @@ class PygameBackend(WindowBackend):
                     # change value range from [-1.0, 1.0] to [0.0, 1.0]
                     if event.axis in [pygame.CONTROLLER_AXIS_TRIGGERLEFT,
                                       pygame.CONTROLLER_AXIS_TRIGGERRIGHT]:
-                        value = (value + 1.0) / 2.0
+                        value = max(0.0, (value + 1.0) / 2.0)
                     events += [Event(EventType.CONTROLLER_AXIS_MOVE,
                                      controller_id=event.instance_id,
                                      axis=PYGAME_CONTROLLER_AXIS_MAP[event.axis],
@@ -818,7 +815,7 @@ class PygameBackend(WindowBackend):
     
     def get_controllers(self):
         controllers = {}
-        for controller in self.controllers:
+        for controller in self.controllers.values():
             controllers[controller.get_id()] = Controller(controller_id=controller.get_id())
         return controllers
 

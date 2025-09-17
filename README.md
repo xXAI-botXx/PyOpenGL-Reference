@@ -20,7 +20,7 @@ Contents:
 - [Graphics Pipeline](#graphics-pipeline)
 - [Installation](#installation)
 - [Lifecycle of interactive graphics-based applications](#lifecycle-of-interactive-graphics-based-applications)
-- [Creating the Window](#creating-the-window)
+- [Input Processing](#input-processing)
 - [Examples](#examples)
 
 
@@ -257,10 +257,247 @@ Still the process can be adjusted for your needs with not much effort at all. Fo
 <br><br>
 
 ---
-### Creating the window
+### Input Processing
+
+The Wind-Forge provides his own input processing and therefore provides here a little introduction with all you need to get started with your own game using keyboard and controller.
+
+The input processing system from Wind-Forge is for keyboards, mice, and controllers across multiple window backends (e.g., Pygame, GLFW). It includes classes to track input states, map backend-specific input events to internal representations, and manage controller events and window events consistently.
+
+<br>
+
+**Important Enumerations:**
+* `WindowLib` – Defines the backend library for window creation and input processing
+    * `PYGAME`
+    * `GLFW`
+* `EventType` – Defines all possible events
+    * Window: `WINDOW_MOVE`, `WINDOW_RESIZE`, `WINDOW_ACCESS`, `WINDOW_ACTIVATION`, `QUIT`
+    * Keyboard: `KEY_DOWN`, `KEY_UP`
+    * Mouse: `MOUSE_MOVE`, `MOUSE_DOWN`, `MOUSE_UP`, `MOUSE_WHEEL`
+    * Controller: `CONTROLLER_ADDED`, `CONTROLLER_REMOVED`, `CONTROLLER_BUTTON_DOWN`, `CONTROLLER_BUTTON_UP`, `CONTROLLER_AXIS_MOVE`
+* `Key` – Keyboard keys (A-Z, `SPACE`, `ENTER`, `SHIFT`, `CTRL`, `ALT`, `ESC`, `TAB`, `BACKSPACE`, arrow keys)
+* `MouseButton` – Mouse input buttons
+    * `LEFT`, `RIGHT`, `MIDDLE`, `BUTTON4`, `BUTTON5`
+* `ControllerButton` – Digital controller buttons (Xbox layout)
+    * `A`, `B`, `X`, `Y`, `LB`, `RB`, `LT`, `RT`, `START`, `SELECT`, `LSTICK`, `RSTICK`, `DPAD`
+    * >`LB` = Left Bumper
+* `ControllerAxis` – Analog axes for controllers
+    * `LEFT_STICK_X`, `LEFT_STICK_Y`, `RIGHT_STICK_X`, `RIGHT_STICK_Y`, `LEFT_TRIGGER`, `RIGHT_TRIGGER`
+* `DpadState` – D-pad directional states
+    * `NEUTRAL`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `UP_RIGHT`, `UP_LEFT`, `DOWN_RIGHT`, `DOWN_LEFT`
+
+<br><br>
+
+**Core Classes:**
+
+* `Event` – Represents a single event with attributes such as `type`, `key`, `mouse_position`, `controller_id`, `axis_value`, etc.
+* `InputState` – Maintains global input state:
+    * Tracks pressed keys, mouse buttons, mouse position, connected controllers, window states
+    * `update(events)` – Processes a list of Event objects, updating internal states and returning a list of processed events
+    * `missing_controller_process(event)` – Handles events for unknown controllers by adding them automatically after repeated detection
+    * `get_all_active()` – Returns all currently active inputs including keys, mouse buttons, positions, and controller states
+* `Controller` – Represents a controller’s state:
+    * Tracks button presses, axis values, and D-pad state
+    * `get_button(button)` – Returns button pressed state
+    * `get_axis(axis)` – Returns axis value
+    * `update_button(button, pressed, dpad_state)` – Updates button state
+    * `update_axis(axis, value)` – Updates axis state
+    * `get_pressed_buttons()` – Returns list of currently pressed buttons
+    * `get_active()` – Returns dict of active buttons and non-neutral axis values
+    * `get_dpad_state()` – Returns current D-pad state
+* `Window` – High-level interface for window creation and event management:
+    * Uses a backend (`PygameBackend` or `GlfwBackend`)
+    * `events()` – Returns processed input events from the backend
+    * `display()` – Swaps buffers for rendering
+    * `quit()` – Closes the window
+* `WindowBackend` (abstract) – Defines required backend methods:
+    * `get_events()`, `get_controllers()`, `swap_buffers()`, `quit()`
+* `PygameBackend` – Concrete backend implementation using Pygame
+* `GlfwBackend` – Concrete backend implementation using GLFW
+
+<br><br>
+
+**Functions:**
+
+* `str_to_version(version_str, number_amount=None)`
+
+  * Converts version strings like `"3.2"` → `[3, 2]`
+  * Pads or truncates depending on `number_amount`
+
+<br><br>
+
+Also important to know are the **value ranges** for the axes:
+* Sticks (`LEFT_STICK_X`, `LEFT_STICK_Y`, `RIGHT_STICK_X`, `RIGHT_STICK_Y`):
+    * Value range: -1.0 → +1.0
+    * Neutral position: 0.0
+    * Negative = left / up, Positive = right / down
+    * ASCII-Visualied of one Stick: 
+        ```text
+                -1.0
+
+        -1.0     0.0    1.0
+            
+                 1.0
+        ```
+* Triggers (`LEFT_TRIGGER`, `RIGHT_TRIGGER`):
+    * Value range: 0.0 → 1.0
+    * Neutral position: 0.0 (not pressed)
+    * Fully pressed = 1.0
+
+<br><br>
+
+**Practise**
+
+In practise you need to call `self.window.events()` to poll events and update the internal state of input devices -> this call is already done for you (except if you do `deactivate_pre_input_processing=True`, then you should call it by yourself) and all polled events are available with `self.events`.<br>
+The Wind-Forge provides you 2 information sources for input devices, one for active events (presses and releases) -> self.events which is a list of `windforge.window.EventType` and one source for passive 'events' (holded), therefore there are no events and it is provided by an object `self.window.input_state` (`windforge.window.InputState` class) -> but you also just can call the `self.window.input_state.get_all_active()` to get all holded inputs.<br>
+The `self.window.input_state.get_all_active()` returns:
+- dict[str, dict]
+    - `keys` - list(windforge.window.Key) Key holded
+    - `mouse` - list(windforge.window.MouseButton) Mousebutton holded
+    - `controllers` - dict[int, list(windforge.window.ControllerButton/ControllerAxis)]
+
+Example:
+```python
+import sys
+sys.path += ["."]
+import windforge as wf
+
+
+class YourAwesomeApp(wf.GraphicsApplication):
+    def __init__(self):
+        super().__init__(size=[512, 512],
+                        resizable=True,
+                        title="Interactive Computer-Graphics Application with Wind-Forge",
+                        multisample=True, 
+                        samples=4, 
+                        depth_buffer=24, 
+                        gl_version=None, 
+                        post_process=[],
+                        background_lib=wf.window.WindowLib.PYGAME,
+                        goal_fps=60,
+                        deactivate_pre_input_processing=False,
+                        print_missed_events=False,
+                        print_catched_events=False)
+
+    def initialize(self):
+        self.counter = 0
+
+    def process_input(self):
+        if self.counter == 0:
+            holded_inputs = self.window.input_state.get_all_active(as_string=True)
+            print(f"Keyboard holds [{', '.join(holded_inputs['keys'])}]")
+            print(f"Mouse holds [{', '.join(holded_inputs['mouse'])}]")
+            for cid, holded_controller_inputs in holded_inputs["controllers"].items():
+                print(f"Controller {cid} holds [{', '.join(holded_controller_inputs)}]")
+
+    def update(self):
+        self.counter += 1
+
+        if self.counter > self.goal_fps:
+            self.counter = 0
+
+
+
+if __name__ == "__main__":
+    YourAwesomeApp().run()
+```
+
+If you still want to use the object itself for the holded inputs, notice following information:<br>
+The input state attribute have following attributes:
+- `controller_event_tolerance` - float
+- `keys` - dict[windforge.window.Key, bool]
+- `mouse_buttons` - dict[windforge.window.MouseButton, bool]
+- `mouse_position` - tuple(int, int)
+- `controllers` - dict[int, windforge.window.Controller]
+- `missed_controllers` - dict[int, int] -> counter for how often missing
+- `window` - dict[str, bool/list(int, int)] -> "position", "size", "accessed", "active"
+- `quit` - bool
+
+Where controllers are a dictionary from the controller class with following attributes:
+- `controller_id` - int
+- `A` - bool
+- `B` - bool
+- `X` - bool
+- `Y` - bool
+- `LB` - bool
+- `RB` - bool
+- `START` - bool
+- `SELECT` - bool
+- `LSTICK` - bool
+- `RSTICK` - bool
+- `DPAD` - bool
+- `dpad_state` - windforge.window.DpadState
+- `LEFT_STICK_X` - float
+- `LEFT_STICK_Y` - float
+- `RIGHT_STICK_X` - float
+- `RIGHT_STICK_Y` - float
+- `LEFT_TRIGGER` - float
+- `RIGHT_TRIGGER` - float
+
+Here are some simple example for the input event access:
+
+```python
+class YourAwesomeApp(wf.GraphicsApplication):
+    def __init__(self):
+        super().__init__(size=[512, 512],
+                        resizable=True,
+                        title="Interactive Computer-Graphics Application with Wind-Forge",
+                        multisample=True, 
+                        samples=4, 
+                        depth_buffer=24, 
+                        gl_version=None,# "3.3", 
+                        post_process=[],
+                        background_lib=wf.window.WindowLib.PYGAME,
+                        goal_fps=60,
+                        deactivate_pre_input_processing=False,
+                        print_missed_events=False,
+                        print_catched_events=False)
+
+    def initialize(self):
+        pass
+
+    def process_input(self):
+        # Printing all Axis Move Events
+        for event in self.events:
+            if event.type == wf.window.EventType.CONTROLLER_AXIS_MOVE:
+                print(f"{event.axis}: {event.axis_value}")
+
+        # Access holded inputs
+        active = self.window.input_state.get_all_active()
+        for cid, actives in active["controllers"].items():
+            if wf.window.ControllerAxis.RIGHT_STICK_X in actives:
+                print(f"Controller {cid}: Right Stick is Active")
+```
+
+```python
+class YourAwesomeApp(wf.GraphicsApplication):
+    def __init__(self):
+        super().__init__(size=[512, 512],
+                        resizable=True,
+                        title="Interactive Computer-Graphics Application with Wind-Forge",
+                        multisample=True, 
+                        samples=4, 
+                        depth_buffer=24, 
+                        gl_version=None,# "3.3", 
+                        post_process=[],
+                        background_lib=wf.window.WindowLib.PYGAME,
+                        goal_fps=60,
+                        deactivate_pre_input_processing=False,
+                        print_missed_events=False,
+                        print_catched_events=False)
+
+    def initialize(self):
+        pass
+
+    def process_input(self):
+        # Printing all holded inputs
+        active = self.window.input_state.get_all_active()
+        for cid, actives in active["controllers"].items():
+            print(f"Controller {cid} holds {actives}")
+```
 
 
 <br><br>
+
 
 ---
 ### Examples
