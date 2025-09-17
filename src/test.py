@@ -15,10 +15,17 @@ class Test(wf.GraphicsApplication):
                         gl_version=None,# "3.3", 
                         post_process=[],
                         background_lib=wf.window.WindowLib.PYGAME,
-                        goal_fps=60)
+                        goal_fps=60,
+                        deactivate_pre_input_processing=False,
+                        print_missed_events=True,
+                        print_catched_events=True)
 
     def initialize(self):
         print("Init...")
+
+    def process_input(self):
+        self.window.events()
+        # return super().process_input()
 
     def update(self):
         pass

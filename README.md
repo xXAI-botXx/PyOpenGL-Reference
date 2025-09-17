@@ -60,7 +60,7 @@ The Wind Forge Graphics/Game Framework/Engine is a here proposed graphics lib, w
 
 Supported Window Backends (for window creation and input processing):
 - [x] [PyGame](https://pypi.org/project/pygame/)
-- [x] [GLFW](https://pypi.org/project/glfw/)
+- [x] [GLFW](https://pypi.org/project/glfw/) (-> Not recommended, Controller Input broken)
 - [ ] [PyQt](https://pypi.org/project/PyQt6/)
 - [ ] [SDL](https://pypi.org/project/PySDL3/)
 - [ ] [Tkinter (with extension)](https://pypi.org/project/pyopengltk/)
