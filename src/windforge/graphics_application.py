@@ -1,17 +1,66 @@
+"""
+Graphics application base for the Wind-Forge Engine.
+
+Provides the `GraphicsApplication` class, which serves as the main
+application loop for interactive graphics programs. It wraps window
+creation, input handling, update loops, and rendering output.
+
+Typical usage:
+    class MyApp(GraphicsApplication):
+        def initialize(self):
+            print("App started")
+
+        def process_input(self):
+            super().process_input()  # or custom input handling
+
+        def update(self):
+            pass  # game logic
+
+        def generate_output(self):
+            pass  # rendering
+
+    if __name__ == "__main__":
+        app = MyApp()
+        app.run()
+"""
+
+
+
+# -------------------------------
+#        >>> Imports <<<
+# -------------------------------
 import sys
 
 from .window import Window, EventType, Key, MouseButton, ControllerButton, ControllerAxis, WindowLib
 from .time import Clock
 
+
+
+# -------------------------------
+#         >>> Class <<<
+# -------------------------------
 class GraphicsApplication():
     """
-    Base class for Wind-Forge Engine.
+    Base class for Wind-Forge Engine applications.
 
-    Inherent from this class and overwrite (as you need):
-    - initialize
-    - process_input
-    - update
-    - generate_output
+    Provides a main loop with initialization, input processing,
+    updating, and rendering. Applications should subclass this
+    class and override the relevant methods.
+
+    Args:
+        size (list[int], optional): Initial window size [width, height]. Default [512, 512].
+        resizable (bool, optional): Whether the window can be resized. Default True.
+        title (str, optional): Window title. Default Wind-Forge message.
+        multisample (bool, optional): Enable multisample anti-aliasing. Default True.
+        samples (int, optional): Number of samples for multisampling. Default 4.
+        depth_buffer (int, optional): Depth buffer size in bits. Default 24.
+        gl_version (tuple[int, int], optional): OpenGL version (major, minor). Default None.
+        post_process (list, optional): List of post-processing effects. Default [].
+        background_lib (WindowLib, optional): Window backend (PYGAME or GLFW). Default PYGAME.
+        goal_fps (int, optional): Target FPS. Default 60.
+        deactivate_pre_input_processing (bool, optional): If True, disables automatic pre-input processing. Default False.
+        print_missed_events (bool, optional): Print debug messages for missed events. Default False.
+        print_catched_events (bool, optional): Print detailed event info for debugging. Default False.
     """
     def __init__(self, 
                  size=[512, 512],
@@ -51,9 +100,10 @@ class GraphicsApplication():
 
     def initialize(self):
         """
-        Will be executed at the beginning of start (run method).
+        Called once before the main loop starts.
 
-        Can be overwritten in inherent class.
+        Override this in your subclass to set up resources
+        such as loading assets, initializing OpenGL, etc.
         """
         pass
 
@@ -109,7 +159,13 @@ class GraphicsApplication():
 
     def pre_input_processing(self):
         """
-        Standard Code which runs before input processing.
+        Run standard pre-processing of input events.
+
+        Collects events from the window, logs them if
+        `print_catched_events` is True, and handles quit events.
+
+        Returns:
+            list[Event]: List of events for this frame.
         """
         events = self.window.events()
         for event in events:
@@ -122,21 +178,31 @@ class GraphicsApplication():
 
     def update(self):
         """
-        Runs every frame and should update objects.<br>
+        Update application state each frame.
 
-        Can be overwritten in inherent class.
+        Override this to update objects, animations, physics, etc.
         """
         pass
 
     def generate_output(self):
         """
-        Runs every frame and should generate outputs.<br>
+        Render output each frame.
 
-        Can be overwritten in inherent class.
+        Override this to perform drawing calls.
+        By default, swaps buffers to display content.
         """
         self.window.display()
 
     def run(self):
+        """
+        Start the main application loop.
+
+        Handles initialization, input, updates, rendering,
+        and frame timing until `self.should_run` is False.
+
+        Raises:
+            SystemExit: When the application quits.
+        """
         # start
         print("> Welcome to Wind-Forge <\n")
         print("[Hint] Make sure to closed every controller control system (for example Steam). Else the systems will disturb each other.\n")

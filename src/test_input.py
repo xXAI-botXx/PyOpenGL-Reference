@@ -22,12 +22,15 @@ class Test(wf.GraphicsApplication):
 
     def initialize(self):
         print("Init...")
-        self.counter = 0
+        self.input_timer = wf.time.Timer(seconds_to_wait=0,
+                                         frames_to_wait=self.goal_fps,
+                                         call_func=None,
+                                         repeat=False)
 
     def process_input(self):
         # return super().process_input()
 
-        if self.counter == 0:
+        if self.input_timer.is_finish():
 
             # for event in self.events:
             #     if event.type == wf.window.EventType.CONTROLLER_BUTTON_DOWN:
@@ -44,10 +47,13 @@ class Test(wf.GraphicsApplication):
                 print(f"Controller {cid} holds [{', '.join(holded_controller_inputs)}]")
 
     def update(self):
-        self.counter += 1
+        self.input_timer.tick()
+        if self.input_timer.is_finish():
+            print(f"Current FPS: {self.clock.get_fps()} (possible would be: {self.clock.get_potential_fps()} FPS)\n\n")
+            self.input_timer.reset()
 
-        if self.counter > self.goal_fps:
-            self.counter = 0
+    def generate_output(self):
+        self.window.display()
 
 
 if __name__ == "__main__":

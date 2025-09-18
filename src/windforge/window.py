@@ -1,3 +1,15 @@
+"""
+Windowing and input abstraction layer for Wind-Forge.
+
+Provides unified interfaces for:
+- Controllers (buttons, sticks, triggers, D-pad)
+- Window backends (Pygame or GLFW)
+- Event polling and input state management
+
+This allows switching between Pygame and GLFW with minimal
+application changes.
+"""
+
 # -------------------------------
 #        >>> Imports <<<
 # -------------------------------
@@ -13,8 +25,16 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pygame.pkgdata")
 original_stdout = sys.stdout
 sys.stdout = open(os.devnull, 'w')
-import pygame
-import glfw
+try:
+    import pygame
+    BACKEND_LOADED_PYGAME = True
+except Exception:
+    BACKEND_LOADED_PYGAME = False
+try:
+    import glfw
+    BACKEND_LOADED_GLFW = True
+except Exception:
+    BACKEND_LOADED_GLFW = False
 sys.stdout.close()
 sys.stdout = original_stdout
 
@@ -327,7 +347,29 @@ GLFW_CONTROLLER_AXIS_MAP = {
 # -------------------------------
 def str_to_version(version_str, number_amount=None) -> list:
     """
-    Converts a string, like 3.2 into an array of ints -> [3, 2].
+    Convert a version string into a list of integers.
+
+    This function extracts all digit groups from the input string and
+    returns them as a list of integers. Optionally, the list can be
+    padded with zeros or truncated to match a specified length.
+
+    Args:
+        version_str (str): The version string, e.g. "3.2" -> [3, 2].
+        number_amount (int, optional): Desired length of the output list.
+            - If None (default), the list length matches the number of detected integers.
+            - If larger than the detected integers, the list is padded with zeros.
+            - If smaller, the list is truncated.
+
+    Returns:
+        list[int]: A list of integers representing the version components.
+
+    Examples:
+        >>> str_to_version("3.2")
+        [3, 2]
+        >>> str_to_version("1.2.3.4", number_amount=2)
+        [1, 2]
+        >>> str_to_version("1.0", number_amount=4)
+        [1, 0, 0, 0]
     """
     numbers = [int(x) for x in re.findall(r"\d+", string=version_str)]
     
@@ -345,6 +387,30 @@ def str_to_version(version_str, number_amount=None) -> list:
 # -------------------------------
 
 class Event(object):
+    """
+    Represents an input or window event.
+
+    This class encapsulates information about various types of events
+    such as keyboard input, mouse actions, controller input, and window events.
+    Each event stores its type and relevant attributes depending on the context.
+
+    Args:
+        event_type (str): The type of the event (see `EventType` enum).
+        key (int, optional): Keyboard key identifier.
+        mouse_pos (tuple[int, int], optional): Mouse position (x, y).
+        mouse_button (int, optional): Mouse button identifier.
+        mouse_scroll (int, optional): Mouse scroll amount.
+        mouse_scroll_precise (float, optional): Precise mouse scroll amount.
+        controller_id (int, optional): Identifier of the controller.
+        controller_button (int, optional): Controller button identifier.
+        controller_dpad (int, optional): D-Pad state or identifier.
+        axis (int | str, optional): Controller axis index or name.
+        axis_value (float, optional): Controller axis value (-1.0 .. 1.0).
+        window_position (tuple[int, int], optional): Window position (x, y).
+        window_size (tuple[int, int], optional): Window size (width, height).
+        is_accessed (bool, optional): Whether the window is accessed.
+        is_active (bool, optional): Whether the window is active.
+    """
     def __init__(self, event_type, 
                  key=None, 
                  mouse_pos=None, 
@@ -377,6 +443,19 @@ class Event(object):
         self.is_active = is_active
 
 class InputState(object):
+    """
+    Manages the current input state and processes events.
+
+    Tracks the state of the keyboard, mouse, controllers, and window.
+    Provides methods for updating input states from events and querying
+    active inputs.
+
+    Args:
+        controller_event_tolerance (float, optional): Threshold for ignoring
+            minor axis movements (default: 0.01).
+        controllers (dict, optional): A mapping of controller IDs to
+            `Controller` objects (default: {}).
+    """
     def __init__(self, controller_event_tolerance=0.01, controllers={}):
         self.controller_event_tolerance = controller_event_tolerance
         self.keys = {}  # dict[int, bool]
@@ -391,6 +470,16 @@ class InputState(object):
         self.quit = False
 
     def update(self, events):
+        """
+        Update the input state based on a sequence of events.
+
+        Args:
+            events (list[Event]): A list of events to process.
+
+        Returns:
+            list[Event]: The list of processed events, possibly including
+            new events generated during processing (e.g. auto-added controllers).
+        """
         new_events = []
         for event in events:
             # Keyboard
@@ -452,6 +541,18 @@ class InputState(object):
         return new_events
 
     def missing_controller_process(self, event):
+        """
+        Handle events for controllers that have not yet been registered.
+
+        If repeated events for the same missing controller are detected,
+        a new controller is automatically added.
+
+        Args:
+            event (Event): The event related to the missing controller.
+
+        Returns:
+            list[Event]: A list of newly generated events (e.g. controller added).
+        """
         new_event_list = []
         cid = event.controller_id
         print(f"[WARNING] Catched Controller Event with missed Controller ID ({cid})")
@@ -463,9 +564,22 @@ class InputState(object):
         return new_event_list
 
     def get_all_active(self, as_string=False):
+        """
+        Get all currently active input states.
+
+        Args:
+            as_string (bool, optional): Whether to return identifiers as
+                human-readable strings (`.name`) instead of numeric values.
+                Defaults to False.
+
+        Returns:
+            dict: A dictionary containing:
+                - "keys" (list): Active keys.
+                - "mouse" (list): Active mouse buttons.
+                - "controllers" (dict): Active controller inputs per controller ID.
+        """
         active_keys = [key for key, pressed in self.keys.items() if pressed]
         active_mouse_buttons = [btn for btn, pressed in self.mouse_buttons.items() if pressed]
-        print(active_mouse_buttons)
 
         active_controllers = {}
         for cid, controller in self.controllers.items():
@@ -483,7 +597,14 @@ class InputState(object):
 
 class Controller(object):
     """
-    Class to represent the state of one controller.
+    Represents the state of a single game controller.
+
+    This class keeps track of digital buttons, analog axes, and the D-Pad.
+    It provides methods for querying and updating the state of the controller,
+    including pressed buttons and active axes.
+
+    Args:
+        controller_id (int): Unique identifier for the controller instance.
     """
     def __init__(self, controller_id):
         self.controller_id = controller_id
@@ -535,16 +656,39 @@ class Controller(object):
         }
 
     def get_button(self, button:ControllerButton):
+        """
+        Get the current state of a button.
+
+        Args:
+            button (ControllerButton): The button to query.
+
+        Returns:
+            bool | None: True if pressed, False if not, None if unknown.
+        """
         attr = self._button_map.get(button)
         return getattr(self, attr) if attr else None
 
     def get_axis(self, axis:ControllerAxis):
+        """
+        Get the current value of an axis.
+
+        Args:
+            axis (ControllerAxis): The axis to query.
+
+        Returns:
+            float | None: Axis value in range [-1.0, 1.0] or None if unknown.
+        """
         attr = self._axis_map.get(axis)
         return getattr(self, attr) if attr else None
 
     def update_button(self, button, pressed: bool, dpad_state=None):
         """
-        Update digital button state.
+        Update the state of a digital button.
+
+        Args:
+            button (ControllerButton): The button to update.
+            pressed (bool): Whether the button is pressed.
+            dpad_state (DpadState, optional): Update D-Pad state if provided.
         """
         attr = self._button_map.get(button)
         if attr:
@@ -555,7 +699,11 @@ class Controller(object):
 
     def update_axis(self, axis, value: float):
         """
-        Update analog axis state.
+        Update the state of an analog axis.
+
+        Args:
+            axis (ControllerAxis): The axis to update.
+            value (float): The new axis value (-1.0 .. 1.0).
         """
         attr = self._axis_map.get(axis)
         if attr:
@@ -563,7 +711,10 @@ class Controller(object):
     
     def get_pressed_buttons(self):
         """
-        Return list of pressed buttons.
+        Get all currently pressed buttons.
+
+        Returns:
+            list[ControllerButton]: List of pressed buttons.
         """
         return [btn for btn, pressed in {
                                         ControllerButton.A: self.A, ControllerButton.B: self.B, 
@@ -576,7 +727,14 @@ class Controller(object):
 
     def get_active(self, as_string=False):
         """
-        Return dict of current buttons and axis values.
+        Get all active inputs (buttons + axes).
+
+        Args:
+            as_string (bool, optional): If True, return names as strings.
+                If False, return enum values. Default: False.
+
+        Returns:
+            list[str | Enum]: Active buttons and axes.
         """
         precision = 0.1
         active = self.get_pressed_buttons()
@@ -592,10 +750,38 @@ class Controller(object):
         
 
     def get_dpad_state(self):
+        """
+        Get the current D-Pad state.
+
+        Returns:
+            DpadState: The current state of the D-Pad.
+        """
         return self.dpad_state
 
 
 class Window(object):
+    """
+    Abstraction for a rendering window with input handling.
+
+    Wraps a platform-specific backend (Pygame or GLFW) and manages
+    window creation, event processing, and input state tracking.
+
+    Args:
+        size (list[int], optional): Initial window size [width, height]. Default [512, 512].
+        resizable (bool, optional): Whether the window can be resized. Default True.
+        title (str, optional): Title of the window. Default is Wind-Forge message.
+        multisample (bool, optional): Enable multisample anti-aliasing. Default True.
+        samples (int, optional): Number of samples for multisampling. Default 4.
+        depth_buffer (int, optional): Depth buffer size in bits. Default 24.
+        gl_version (tuple[int, int], optional): OpenGL version (major, minor). Default None.
+        post_process (list, optional): List of post-processing effects. Default [].
+        background_lib (WindowLib, optional): Backend to use (PYGAME or GLFW). Default PYGAME.
+        print_missed_events (bool, optional): Print debug messages for missed events. Default False.
+
+    Raises:
+        Exception: If the requested backend is not loaded.
+        ValueError: If the backend type is unknown.
+    """
     def __init__(self, 
                 size=[512, 512],
                 resizable=True,
@@ -610,6 +796,8 @@ class Window(object):
         self.background_lib = background_lib
         
         if background_lib == WindowLib.PYGAME:
+            if not BACKEND_LOADED_PYGAME:
+                raise Exception("Pygame backend got not loaded but you tried to load it. Make sure you installed pygame.")
             self.backend = PygameBackend(size=size, resizable=resizable,
                                          title=title, 
                                          multisample=multisample, samples=samples, 
@@ -617,6 +805,8 @@ class Window(object):
                                          post_process=post_process, 
                                          print_missed_events=print_missed_events)
         elif background_lib == WindowLib.GLFW:
+            if not BACKEND_LOADED_GLFW:
+                raise Exception("GLFW backend got not loaded but you tried to load it. Make sure you installed GLFW.")
             self.backend = GlfwBackend(size=size, resizable=resizable,
                                        title=title, 
                                        multisample=multisample, samples=samples, 
@@ -630,21 +820,66 @@ class Window(object):
                                       controllers=self.backend.get_controllers())
 
     def get(self):
+        """
+        Get the backend's screen or rendering surface.
+
+        Returns:
+            object: The backend-specific screen object.
+        """
         return self.screen
 
     def events(self):
+        """
+        Process and return all new events.
+
+        Returns:
+            list[Event]: A list of processed events.
+        """
         return self.input_state.update(self.backend.get_events())
 
     def display(self):
+        """
+        Swap the display buffers.
+
+        Call this once per frame to present the rendered image.
+        """
         self.backend.swap_buffers()
 
     def quit(self):
+        """
+        Shut down the window and backend.
+
+        Cleans up resources and closes the window.
+        """
         self.backend.quit()
 
 
 
 # Classes for the Window Background -> Window creation + Input Processing
 class WindowBackend(ABC):
+    """
+    Abstract base class for windowing backends.
+
+    Provides a unified interface for creating an OpenGL-capable
+    window, handling events, and managing controllers.
+
+    Args:
+        size (tuple[int, int]): Window size as (width, height).
+        resizable (bool): Whether the window can be resized.
+        title (str): Title of the window.
+        multisample (bool): Enable multisample anti-aliasing.
+        samples (int): Number of samples for multisampling.
+        depth_buffer (int): Depth buffer size in bits.
+        gl_version (str or None): OpenGL version string (e.g., "3.3"). If None, system default is used.
+        post_process (list): Post-processing pipeline (optional).
+        print_missed_events (bool): Whether to print unhandled events for debugging.
+
+    Methods:
+        get_events(): Poll and return all pending events from the backend.
+        get_controllers(): Return dictionary of currently connected controllers.
+        swap_buffers(): Swap the front and back buffers.
+        quit(): Shut down the backend and release resources.
+    """
     def __init__(self, size, resizable, title, multisample, samples, depth_buffer, gl_version, post_process,
                  print_missed_events):
         self.size = size
@@ -660,23 +895,72 @@ class WindowBackend(ABC):
 
     @abstractmethod
     def get_events(self):
+        """
+        Poll events from the backend event queue.
+
+        Returns:
+            list[Event]: A list of normalized Event objects.
+        """
         pass
 
     @abstractmethod
     def get_controllers(self):
+        """
+        Retrieve the currently connected controllers.
+
+        Returns:
+            dict[int, Controller]: A dictionary mapping controller IDs
+            to Controller objects.
+        """
         pass
 
     @abstractmethod
     def swap_buffers(self):
+        """
+        Swap the front and back buffers.
+
+        This should be called once per frame after rendering.
+        """
         pass
 
     @abstractmethod
     def quit(self):
+        """
+        Shut down the backend and release resources.
+
+        Should be called before program termination.
+        """
         pass
 
 
 
 class PygameBackend(WindowBackend):
+    """
+    Pygame implementation of the WindowBackend interface.
+
+    Wraps pygame to create an OpenGL window, process input events,
+    and manage controller connections.
+
+    Args:
+        size (tuple[int, int]): Window size as (width, height).
+        resizable (bool): Whether the window can be resized.
+        title (str): Title of the window.
+        multisample (bool): Enable multisample anti-aliasing.
+        samples (int): Number of samples for multisampling.
+        depth_buffer (int): Depth buffer size in bits.
+        gl_version (str or None): OpenGL version string (e.g., "3.3").
+        post_process (list): Post-processing pipeline (optional).
+        print_missed_events (bool): Whether to print unhandled events for debugging.
+
+    Raises:
+        Exception: If pygame is not available or initialization fails.
+
+    Methods:
+        get_events(): Poll and translate pygame events into the unified Event API.
+        get_controllers(): Return dictionary of connected controllers.
+        swap_buffers(): Swap the OpenGL display buffers.
+        quit(): Shut down pygame and release resources.
+    """
     def __init__(self, size, resizable, title, multisample, samples, depth_buffer, gl_version, post_process,
                  print_missed_events):
         super().__init__(size, resizable, title, multisample, samples, depth_buffer, gl_version, post_process,
@@ -722,28 +1006,35 @@ class PygameBackend(WindowBackend):
             print(f"[INFO] Initialized joystick {controller_id}: {controller.get_name()}")
 
     def get_events(self):
+        """
+        Poll and translate pygame events into the unified Event API.
+
+        Returns:
+            list[Event]: A list of normalized Event objects generated
+            from pygame's event system.
+        """
         events = []
         for event in pygame.event.get():
             # print(f"Event detected: {event}")
             # Window
             if event.type == pygame.QUIT:
                 events += [Event(event_type=EventType.QUIT)]
-            elif event.type == event.type == pygame.WINDOWMOVED:
+            elif event.type == pygame.WINDOWMOVED:
                 events += [Event(event_type=EventType.WINDOW_MOVE,
                                  window_position=(event.x, event.y))]
-            elif event.type == event.type == pygame.VIDEORESIZE:
+            elif event.type == pygame.VIDEORESIZE:
                 events += [Event(event_type=EventType.WINDOW_RESIZE,
                                  window_size=(event.w, event.h))]
-            elif event.type == event.type == pygame.ACTIVEEVENT:  # pygame.WINDOWENTER:
+            elif event.type == pygame.ACTIVEEVENT:  # pygame.WINDOWENTER:
                 events += [Event(event_type=EventType.WINDOW_ACCESS,
                                  is_accessed=event.gain)]
-            # elif event.type == event.type == pygame.WINDOWLEAVE:
+            # elif event.type == pygame.WINDOWLEAVE:
             #     events += [Event(event_type=EventType.WINDOW_ACCESS,
             #                      is_accessed=False)]
-            elif event.type == event.type == pygame.WINDOWFOCUSGAINED:
+            elif event.type == pygame.WINDOWFOCUSGAINED:
                 events += [Event(event_type=EventType.WINDOW_ACTIVATION,
                                  is_active=True)]
-            elif event.type == event.type == pygame.WINDOWFOCUSLOST:
+            elif event.type == pygame.WINDOWFOCUSLOST:
                 events += [Event(event_type=EventType.WINDOW_ACTIVATION,
                                  is_active=False)]
                 
@@ -814,20 +1105,65 @@ class PygameBackend(WindowBackend):
         return events
     
     def get_controllers(self):
+        """
+        Return the currently connected controllers.
+
+        Returns:
+            dict[int, Controller]: A dictionary mapping controller IDs
+            to Controller objects.
+        """
         controllers = {}
         for controller in self.controllers.values():
             controllers[controller.get_id()] = Controller(controller_id=controller.get_id())
         return controllers
 
     def swap_buffers(self):
+        """
+        Swap the OpenGL display buffers.
+
+        This finalizes rendering for the current frame.
+        """
         pygame.display.flip()
 
     def quit(self):
+        """
+        Shut down pygame and release resources.
+
+        This should be called before program termination to ensure
+        that pygame cleans up properly.
+        """
         pygame.quit()
 
 
 
 class GlfwBackend(WindowBackend):
+    """
+    GLFW implementation of the WindowBackend interface.
+
+    Wraps GLFW to create an OpenGL window, process input events
+    via callbacks, and manage joystick state polling.
+
+    Args:
+        size (tuple[int, int]): Window size as (width, height).
+        resizable (bool): Whether the window can be resized.
+        title (str): Title of the window.
+        multisample (bool): Enable multisample anti-aliasing.
+        samples (int): Number of samples for multisampling.
+        depth_buffer (int): Depth buffer size in bits.
+        gl_version (str or None): OpenGL version string (e.g., "3.3").
+        post_process (list): Post-processing pipeline (optional).
+        print_missed_events (bool): Whether to print unhandled events for debugging.
+
+    Raises:
+        RuntimeError: If GLFW initialization fails.
+        Exception: If window creation fails.
+
+    Methods:
+        get_events(): Poll GLFW and queued callbacks, return unified Event objects.
+        get_controllers(): Return connected controllers (currently unimplemented).
+        swap_buffers(): Swap the OpenGL display buffers.
+        quit(): Destroy the window and terminate GLFW.
+    """
     def __init__(self, size, resizable, title, multisample, samples, depth_buffer, gl_version, post_process,
                  print_missed_events):
         super().__init__(size, resizable, title, multisample, samples, depth_buffer, gl_version, post_process,
@@ -912,6 +1248,13 @@ class GlfwBackend(WindowBackend):
                 }
 
     def get_events(self):
+        """
+        Poll GLFW events and process queued callbacks.
+
+        Returns:
+            list[Event]: A list of normalized Event objects generated
+            from GLFW input and window events.
+        """
         events = []
 
         glfw.poll_events()
@@ -1067,14 +1410,35 @@ class GlfwBackend(WindowBackend):
         return events
     
     def get_controllers(self):
+        """
+        Retrieve currently connected controllers.
+
+        Note:
+            GLFW has no high-level controller abstraction, so this
+            implementation returns an empty dictionary.
+
+        Returns:
+            dict[int, Controller]: Always an empty dictionary for now.
+        """
         # GLFW itself doesn’t have a high-level controller API like pygame
         # FIXME -> return an empty dict
         return {}
 
     def swap_buffers(self):
+        """
+        Swap the OpenGL display buffers.
+
+        This finalizes rendering for the current frame.
+        """
         glfw.swap_buffers(self.screen)
 
     def quit(self):
+        """
+        Destroy the GLFW window and terminate the library.
+
+        This should be called before program termination to ensure
+        GLFW cleans up properly.
+        """
         pass
 
 
